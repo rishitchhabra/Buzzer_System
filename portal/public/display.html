@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buzzer Live</title>
+<style>
+  :root{
+    --bg:#070a11; --bg2:#0c111b; --panel:rgba(255,255,255,.035); --panel2:rgba(255,255,255,.06);
+    --line:rgba(255,255,255,.09); --txt:#eef2fa; --mut:#8492aa;
+    --acc:#5b8cff; --ok:#22d3a7; --bad:#ff5d6c; --warn:#ffb020;
+    --r:20px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden}
+  body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  body.light{--bg:#eef1f7;--bg2:#ffffff;--panel:rgba(255,255,255,.75);--panel2:#ffffff;--line:#e2e7f0;--txt:#141b2b;--mut:#66718a;--acc:#3b62e6;--ok:#12a37a;--bad:#e14b57;--warn:#d98a0b}
+
+  /* animated background */
+  .bg{position:fixed;inset:0;overflow:hidden;z-index:0}
+  .blob{position:absolute;border-radius:50%;filter:blur(80px);opacity:.5}
+  .b1{width:44vw;height:44vw;background:#2b52ff33;top:-12vw;left:-8vw;animation:float1 22s ease-in-out infinite}
+  .b2{width:38vw;height:38vw;background:#12a37a26;bottom:-14vw;right:-6vw;animation:float2 26s ease-in-out infinite}
+  .b3{width:30vw;height:30vw;background:#e14b571f;top:30%;left:45%;animation:float3 30s ease-in-out infinite}
+  body.light .blob{opacity:.35}
+  @keyframes float1{50%{transform:translate(6vw,5vw) scale(1.1)}}
+  @keyframes float2{50%{transform:translate(-6vw,-4vw) scale(1.08)}}
+  @keyframes float3{50%{transform:translate(-4vw,6vw) scale(.92)}}
+
+  .app{position:relative;z-index:1;height:100%;display:flex;flex-direction:column;padding:18px 22px 20px;gap:16px}
+
+  /* header */
+  .hud{display:flex;align-items:center;gap:18px}
+  .brand{font-size:13px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:7px 14px;background:var(--panel)}
+  .brand b{color:var(--acc)}
+  .hud-titles{margin-left:4px}
+  .contest{font-size:24px;font-weight:800;letter-spacing:.2px;line-height:1.1}
+  .roundline{display:flex;align-items:center;gap:10px;color:var(--mut);font-size:14px;margin-top:3px}
+  .chip{font-size:11.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;padding:3px 9px;border-radius:999px;background:var(--acc);color:#fff}
+  .spacer{flex:1}
+  .phase{font-size:12.5px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;padding:9px 16px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--mut);transition:.3s}
+  .phase.live{color:#7df0cf;border-color:#22d3a766;background:#22d3a71a;box-shadow:0 0 24px #22d3a733;animation:breathe 1.8s ease-in-out infinite}
+  .phase.ready{color:#ffd591;border-color:#ffb02066;background:#ffb0201f}
+  @keyframes breathe{50%{box-shadow:0 0 40px #22d3a755}}
+  .themebtn{background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:8px 14px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+
+  /* grid */
+  .grid{flex:1;display:grid;grid-template-columns:1fr 380px;gap:18px;min-height:0}
+  .stage{position:relative;border-radius:var(--r);border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;overflow:hidden;padding:34px}
+  .rail{display:flex;flex-direction:column;gap:16px;min-height:0}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);backdrop-filter:blur(12px);padding:16px 16px 14px;display:flex;flex-direction:column;min-height:0}
+  .panel.grow{flex:1}
+  .panel-head{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--mut);margin-bottom:12px}
+  .armed{font-size:10.5px;letter-spacing:1px;padding:3px 9px;border-radius:999px;background:#22d3a71f;color:#7df0cf;border:1px solid #22d3a755;animation:breathe 1.4s ease-in-out infinite}
+
+  /* question */
+  .qcard{width:100%;max-width:1000px;text-align:center;animation:rise .5s cubic-bezier(.2,.8,.2,1) both}
+  .qteam{display:inline-block;font-size:14px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;padding:7px 18px;border-radius:999px;background:var(--acc);color:#fff;margin-bottom:16px;box-shadow:0 10px 30px -10px var(--acc)}
+  .qtext{font-size:clamp(26px,3.4vw,52px);font-weight:800;line-height:1.22;margin:6px 0}
+  .qmedia{margin:18px auto 0;max-width:100%}
+  .qmedia img,.qmedia video{max-height:40vh;max-width:100%;border-radius:16px;border:1px solid var(--line);display:block;margin:0 auto}
+  .opts{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:22px}
+  .opt{display:flex;align-items:center;gap:12px;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:15px 18px;font-size:19px;font-weight:600;text-align:left;animation:rise .5s both}
+  .opt:nth-child(2){animation-delay:.06s}.opt:nth-child(3){animation-delay:.12s}.opt:nth-child(4){animation-delay:.18s}.opt:nth-child(5){animation-delay:.24s}.opt:nth-child(6){animation-delay:.3s}
+  .opt .k{width:32px;height:32px;border-radius:9px;background:var(--acc);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0}
+  @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+
+  /* waiting / result */
+  .center-msg{text-align:center;color:var(--mut);animation:rise .5s both}
+  .center-msg .big{font-size:30px;font-weight:800;color:var(--txt);margin-bottom:6px}
+  .pulse-dot{width:12px;height:12px;border-radius:50%;background:var(--acc);display:inline-block;margin-right:10px;box-shadow:0 0 0 0 var(--acc);animation:ping 1.6s infinite}
+  @keyframes ping{0%{box-shadow:0 0 0 0 var(--acc)}70%{box-shadow:0 0 0 16px transparent}100%{box-shadow:0 0 0 0 transparent}}
+
+  .result{text-align:center;animation:rise .4s both}
+  .result .rteam{font-size:24px;font-weight:800;color:var(--txt)}
+  .result .rverdict{font-size:clamp(40px,6vw,90px);font-weight:900;line-height:1;margin:10px 0;letter-spacing:-1px}
+  .result.correct .rverdict{color:var(--ok);text-shadow:0 0 60px #22d3a766}
+  .result.wrong .rverdict{color:var(--bad);text-shadow:0 0 60px #ff5d6c66}
+  .result .rpts{font-size:24px;font-weight:800;color:var(--mut)}
+  .flash{position:absolute;inset:0;pointer-events:none;animation:flash .9s ease-out both}
+  .flash.correct{background:radial-gradient(circle at 50% 50%,#22d3a733,transparent 60%)}
+  .flash.wrong{background:radial-gradient(circle at 50% 50%,#ff5d6c33,transparent 60%)}
+  @keyframes flash{from{opacity:1}to{opacity:0}}
+
+  /* countdown */
+  .cd{display:flex;flex-direction:column;align-items:center;justify-content:center;animation:rise .3s both}
+  .cd .ringwrap{position:relative;width:min(42vh,360px);height:min(42vh,360px)}
+  .cd svg{transform:rotate(-90deg);width:100%;height:100%}
+  .rtrack{fill:none;stroke:var(--line);stroke-width:10}
+  .rfill{fill:none;stroke:var(--acc);stroke-width:10;stroke-linecap:round;transition:stroke-dashoffset .1s linear;filter:drop-shadow(0 0 12px var(--acc))}
+  .cdnum{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:min(22vh,190px);font-weight:900;color:var(--txt);animation:cdpop 1s ease both}
+  @keyframes cdpop{0%{transform:scale(.4);opacity:0}40%{transform:scale(1.15);opacity:1}100%{transform:scale(1)}}
+  .cdlbl{margin-top:10px;color:var(--mut);letter-spacing:5px;text-transform:uppercase;font-size:14px;font-weight:700}
+
+  /* buzzer queue */
+  .buzz-list{display:flex;flex-direction:column;gap:9px;overflow:auto;min-height:0}
+  .hint{color:var(--mut);font-size:14px;padding:14px 4px}
+  .buzz{display:flex;align-items:center;gap:12px;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:11px 13px;position:relative;overflow:hidden}
+  .buzz.enter{animation:slideIn .45s cubic-bezier(.2,.9,.2,1) both}
+  @keyframes slideIn{from{opacity:0;transform:translateX(38px) scale(.96)}to{opacity:1;transform:none}}
+  .buzz .rank{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;background:var(--panel2);border:1px solid var(--line);flex-shrink:0}
+  .buzz .nm{font-weight:700;font-size:16px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .buzz .tm{font-variant-numeric:tabular-nums;color:var(--mut);font-size:13px;font-weight:600}
+  .buzz .bar{position:absolute;left:0;bottom:0;height:3px;border-radius:3px}
+  .buzz.first{border-color:var(--warn);background:linear-gradient(90deg,#ffb02022,transparent)}
+  .buzz.first .rank{background:var(--warn);color:#241600;border-color:transparent}
+
+  /* leaderboard */
+  .board{display:flex;flex-direction:column;gap:8px;overflow:auto;min-height:0}
+  .brow{display:grid;grid-template-columns:26px 12px 1fr auto;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:var(--panel2);border:1px solid transparent;position:relative;overflow:hidden;transition:border-color .3s}
+  .brow .rank{font-weight:800;color:var(--mut);font-size:14px}
+  .brow .dotc{width:10px;height:10px;border-radius:50%}
+  .brow .bname{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .brow .lead{font-size:9.5px;font-weight:800;letter-spacing:1px;color:var(--warn);border:1px solid var(--warn);border-radius:999px;padding:1px 7px;margin-left:8px}
+  .brow .bscore{font-weight:900;font-size:18px;font-variant-numeric:tabular-nums}
+  .brow .bbar{position:absolute;left:0;bottom:0;height:3px;width:100%;background:transparent}
+  .brow .bbar i{display:block;height:100%;width:0;border-radius:3px;transition:width .6s cubic-bezier(.2,.8,.2,1)}
+  .brow.leader{border-color:var(--warn);box-shadow:0 0 26px -6px #ffb02066}
+  .brow.neg .bscore{color:var(--bad)}
+
+  @media (max-width:1100px){ .grid{grid-template-columns:1fr} .rail{display:none} }
+</style>
+</head>
+<body>
+<div class="bg"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+<div class="app">
+  <header class="hud">
+    <div class="brand">Buzzer <b>Live</b></div>
+    <div class="hud-titles">
+      <div class="contest" id="contestName">Buzzer Live</div>
+      <div class="roundline"><span id="roundName">Waiting for a round…</span><span class="chip" id="roundType" hidden></span></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="phase" id="phasePill">Idle</div>
+    <button class="themebtn" id="themeBtn"></button>
+  </header>
+  <main class="grid">
+    <section class="stage" id="stage"></section>
+    <aside class="rail">
+      <div class="panel">
+        <div class="panel-head"><span>Buzzer Queue</span><span class="armed" id="armed" hidden>Live</span></div>
+        <div class="buzz-list" id="buzzList"><div class="hint">Waiting for buzzes…</div></div>
+      </div>
+      <div class="panel grow">
+        <div class="panel-head"><span>Leaderboard</span></div>
+        <div class="board" id="board"></div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script>
+const PALETTE = ['#5b8cff','#22d3a7','#f5a623','#ef5da8','#a78bfa','#38bdf8','#fb7185','#34d399','#facc15','#f97316'];
+const el = {
+  contest: document.getElementById('contestName'),
+  roundName: document.getElementById('roundName'),
+  roundType: document.getElementById('roundType'),
+  phase: document.getElementById('phasePill'),
+  armed: document.getElementById('armed'),
+  stage: document.getElementById('stage'),
+  buzzList: document.getElementById('buzzList'),
+  board: document.getElementById('board'),
+  themeBtn: document.getElementById('themeBtn'),
+};
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function colorFor(id, teams){ const i = (teams||[]).findIndex(t=>t.id===id); return PALETTE[(i<0?0:i)%PALETTE.length]; }
+function typeLabel(t){ return t==='rapid'?'Rapid Fire':t==='activity'?'Activity':'Normal'; }
+
+/* ---------- theme ---------- */
+const SUN = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+const MOON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>';
+function applyTheme(){
+  const t = localStorage.getItem('theme')||'dark';
+  document.body.classList.toggle('light', t==='light');
+  el.themeBtn.innerHTML = (t==='light'?MOON:SUN) + (t==='light'?'Dark':'Light');
+}
+el.themeBtn.addEventListener('click', ()=>{ localStorage.setItem('theme', (document.body.classList.contains('light')?'dark':'light')); applyTheme(); });
+applyTheme();
+
+/* ---------- countdown ---------- */
+const CIRC = 2 * Math.PI * 88;
+let cdRAF = null;
+function stopCountdown(){ if(cdRAF){ cancelAnimationFrame(cdRAF); cdRAF=null; } }
+function renderCountdown(d){
+  const endsAt = d.countdownEndsAt || (Date.now()+3000);
+  const total = 3000;
+  el.stage.innerHTML = `<div class="cd"><div class="ringwrap">
+      <svg viewBox="0 0 200 200"><circle class="rtrack" cx="100" cy="100" r="88"/>
+      <circle class="rfill" id="rfill" cx="100" cy="100" r="88" stroke-dasharray="${CIRC}" stroke-dashoffset="0"/></svg>
+      <div class="cdnum" id="cdnum">3</div></div><div class="cdlbl">Get ready</div></div>`;
+  const fill = document.getElementById('rfill');
+  const num = document.getElementById('cdnum');
+  let lastN = null;
+  const tick = ()=>{
+    const remaining = Math.max(0, endsAt - Date.now());
+    const pct = Math.max(0, Math.min(1, remaining/total));
+    fill.style.strokeDashoffset = (CIRC * (1-pct)).toFixed(1);
+    const n = Math.max(1, Math.ceil(remaining/1000));
+    if(n !== lastN){ num.textContent = n; num.style.animation='none'; void num.offsetWidth; num.style.animation='cdpop 1s ease both'; lastN = n; }
+    if(remaining > 0) cdRAF = requestAnimationFrame(tick);
+  };
+  stopCountdown(); tick();
+}
+
+/* ---------- stage ---------- */
+let stageKey = null;
+function applyStage(d){
+  if(!d.active){ eliteOff(); el.stage.innerHTML = `<div class="center-msg"><div class="big"><span class="pulse-dot"></span>Waiting for a round</div><div>The display will update automatically.</div></div>`; stageKey='idle'; return; }
+
+  const key = d.phase + '|' + (d.question?d.question.id:'') + '|' + (d.lastScored?(d.lastScored.teamId+':'+d.lastScored.awarded):'');
+  if(key === stageKey) return;
+  stageKey = key;
+
+  if(d.phase === 'countdown'){ renderCountdown(d); return; }
+  stopCountdown();
+
+  if(d.phase === 'scored' && d.lastScored){
+    const s = d.lastScored;
+    el.stage.innerHTML = `<div class="flash ${s.correct?'correct':'wrong'}"></div>
+      <div class="result ${s.correct?'correct':'wrong'}">
+        <div class="rteam">${esc(s.teamName)}</div>
+        <div class="rverdict">${s.correct?'CORRECT':'WRONG'}</div>
+        <div class="rpts">${s.awarded>=0?'+':''}${s.awarded} points</div>
+      </div>`;
+    return;
+  }
+
+  if(d.question){
+    const q = d.question;
+    const media = (q.image?`<div class="qmedia"><img src="${esc(q.image)}"></div>`:'') + (q.video?`<div class="qmedia"><video src="${esc(q.video)}" controls></video></div>`:'');
+    const opts = (q.options && q.options.length)
+      ? '<div class="opts">'+q.options.map((o,i)=>`<div class="opt"><span class="k">${String.fromCharCode(65+i)}</span><span>${esc(o.text)}</span></div>`).join('')+'</div>' : '';
+    const team = d.currentTeam ? `<div class="qteam">${esc(d.currentTeam)}</div>` : (d.activityIndex?`<div class="qteam">Activity ${d.activityIndex}</div>`:'');
+    el.stage.innerHTML = `<div class="qcard">${team}<div class="qtext">${esc(q.text)}</div>${media}${opts}</div>`;
+    return;
+  }
+
+  el.stage.innerHTML = `<div class="center-msg"><div class="big"><span class="pulse-dot"></span>${esc(d.currentTeam||'Get ready')}</div><div>${d.activityIndex?('Activity '+d.activityIndex):'Waiting…'}</div></div>`;
+}
+function eliteOff(){ stopCountdown(); }
+
+/* ---------- queue ---------- */
+function applyQueue(d){
+  const q = (d.active ? d.buzzerQueue : []) || [];
+  const list = el.buzzList;
+  // remove entries no longer present
+  [...list.querySelectorAll('.buzz')].forEach(n=>{ if(!q.some(b=>String(b.teamId)===n.dataset.id)) n.remove(); });
+  const hint = list.querySelector('.hint');
+  if(q.length && hint) hint.remove();
+  if(!q.length && !list.querySelector('.hint')) list.innerHTML = '<div class="hint">Waiting for buzzes…</div>';
+
+  const maxT = Math.max.apply(null, q.map(b=>b.timeMs||0).concat([1]));
+  q.forEach((b, i)=>{
+    let node = list.querySelector('[data-id="'+b.teamId+'"]');
+    if(!node){ node = document.createElement('div'); node.className='buzz enter'; node.dataset.id = b.teamId; }
+    node.style.order = i;
+    node.className = 'buzz' + (i===0?' first':'') + (node.classList.contains('enter')?' enter':'');
+    const color = colorFor(b.teamId, d.teams);
+    const pct = q.length>1 ? (25 + 75*(1 - (b.timeMs||0)/maxT)) : 100;
+    node.innerHTML = `<span class="rank" style="color:${i===0?'#241600':'var(--txt)'}">${i+1}</span>
+      <span class="nm">${esc(b.teamName)}</span>
+      <span class="tm">${(b.timeMs||0).toFixed(1)} ms</span>
+      <span class="bar" style="width:${pct}%;background:${color}"></span>`;
+    if(!node.parentNode) list.appendChild(node);
+    setTimeout(()=>node.classList.remove('enter'), 500);
+  });
+}
+
+/* ---------- leaderboard ---------- */
+function applyBoard(d){
+  const board = el.board;
+  const teams = (d.teams||[]).slice().sort((a,b)=>((d.scores[b.id]||0)-(d.scores[a.id]||0)));
+  const maxAbs = Math.max.apply(null, teams.map(t=>Math.abs(d.scores[t.id]||0)).concat([1]));
+  const leadVal = teams.length?(d.scores[teams[0].id]||0):0;
+  const second = teams.length>1?(d.scores[teams[1].id]||0):-1;
+  const hasLeader = teams.length>0 && leadVal > second;
+
+  teams.forEach((t,i)=>{
+    let row = board.querySelector('[data-team="'+t.id+'"]');
+    if(!row){
+      row = document.createElement('div'); row.className='brow enter'; row.dataset.team = t.id;
+      row.innerHTML = '<span class="rank"></span><span class="dotc"></span><span class="bname"></span><span class="bscore"></span><span class="bbar"><i></i></span>';
+      board.appendChild(row);
+      setTimeout(()=>row.classList.remove('enter'), 500);
+    }
+    const score = d.scores[t.id]||0;
+    const color = colorFor(t.id, d.teams);
+    row.style.order = i;
+    row.querySelector('.rank').textContent = i+1;
+    row.querySelector('.dotc').style.background = color;
+    row.querySelector('.bname').innerHTML = esc(t.name) + ((i===0&&hasLeader)?'<span class="lead">LEAD</span>':'');
+    row.querySelector('.bscore').textContent = score;
+    const bar = row.querySelector('.bbar > i');
+    bar.style.width = Math.max(4, Math.round(Math.abs(score)/maxAbs*100)) + '%';
+    bar.style.background = color;
+    row.classList.toggle('leader', i===0&&hasLeader);
+    row.classList.toggle('neg', score<0);
+  });
+  [...board.children].forEach(n=>{ if(!teams.some(t=>String(t.id)===n.dataset.team)) n.remove(); });
+}
+
+/* ---------- main ---------- */
+function apply(d){
+  el.contest.textContent = d.contestName || 'Buzzer Live';
+  if(d.active){
+    el.roundName.textContent = d.round.name;
+    el.roundType.hidden = false;
+    el.roundType.textContent = typeLabel(d.round.type);
+    const p = d.phase;
+    el.phase.className = 'phase' + (p==='question'&&d.round.type==='rapid' ? ' live' : p==='countdown' ? ' ready' : '');
+    el.phase.textContent = p==='countdown'?'Get Ready':p==='question'?(d.round.type==='rapid'?'Buzzers Live':'Question'):p==='scored'?'Result':p==='done'?'Round End':'Live';
+    el.armed.hidden = !(p==='question' && d.round.type==='rapid');
+  } else {
+    el.roundName.textContent = 'Waiting for a round…';
+    el.roundType.hidden = true;
+    el.phase.className = 'phase'; el.phase.textContent = 'Idle';
+    el.armed.hidden = true;
+  }
+  applyStage(d);
+  applyQueue(d);
+  applyBoard(d);
+}
+
+async function poll(){
+  try{ const d = await fetch('/api/display').then(r=>r.json()); apply(d); }catch(e){}
+  setTimeout(poll, 500);
+}
+poll();
+</script>
+</body>
+</html>
