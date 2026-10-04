@@ -13,7 +13,7 @@
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;overflow:hidden}
-  body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   body.light{--bg:#eef1f7;--bg2:#ffffff;--panel:rgba(255,255,255,.75);--panel2:#ffffff;--line:#e2e7f0;--txt:#141b2b;--mut:#66718a;--acc:#3b62e6;--ok:#12a37a;--bad:#e14b57;--warn:#d98a0b}
 
   /* animated background */
@@ -56,11 +56,11 @@
   /* question */
   .qcard{width:100%;max-width:1000px;text-align:center;animation:rise .5s cubic-bezier(.2,.8,.2,1) both}
   .qteam{display:inline-block;font-size:14px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;padding:7px 18px;border-radius:999px;background:var(--acc);color:#fff;margin-bottom:16px;box-shadow:0 10px 30px -10px var(--acc)}
-  .qtext{font-size:clamp(26px,3.4vw,52px);font-weight:800;line-height:1.22;margin:6px 0}
+  .qtext{font-size:clamp(26px,3.1vw,44px);font-weight:500;line-height:1.45;letter-spacing:.2px;margin:12px auto;max-width:1100px}
   .qmedia{margin:18px auto 0;max-width:100%}
   .qmedia img,.qmedia video{max-height:40vh;max-width:100%;border-radius:16px;border:1px solid var(--line);display:block;margin:0 auto}
   .opts{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:22px}
-  .opt{display:flex;align-items:center;gap:12px;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:15px 18px;font-size:19px;font-weight:600;text-align:left;animation:rise .5s both}
+  .opt{display:flex;align-items:center;gap:12px;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:15px 18px;font-size:19px;font-weight:500;text-align:left;animation:rise .5s both}
   .opt:nth-child(2){animation-delay:.06s}.opt:nth-child(3){animation-delay:.12s}.opt:nth-child(4){animation-delay:.18s}.opt:nth-child(5){animation-delay:.24s}.opt:nth-child(6){animation-delay:.3s}
   .opt .k{width:32px;height:32px;border-radius:9px;background:var(--acc);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0}
   @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}

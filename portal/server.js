@@ -561,5 +561,5 @@ auth.createDefaultAdmin();
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`\nBuzzer portal running on http://localhost:${PORT}`);
   console.log(`Devices point to:  http://<your-LAN-IP>:${PORT}`);
-  console.log(`Database:          ${store.DB_FILE}\n`);
+  console.log(`Data store:        ${store.usingSQLite() ? store.DB_FILE : store.JSON_FILE}`);
 });
