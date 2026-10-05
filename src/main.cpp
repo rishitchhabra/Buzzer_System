@@ -92,9 +92,7 @@ String jsonEscape(const String& in) {
 
 void queueEvent(const String& type, const String& payload) {
   if (eqCount >= EVENT_QUEUE_MAX) return;   // drop when full
-  String j = "{\"deviceId\":\"" + deviceId + "\",\"type\":\"" + type +
-             "\",\"payload\":" + payload + "}";
-  eventQueue[eqTail].json = j;
+  eventQueue[eqTail].json = "{\"type\":\"" + type + "\",\"payload\":" + payload + "}";
   eqTail = (eqTail + 1) % EVENT_QUEUE_MAX;
   eqCount++;
 }
@@ -200,11 +198,18 @@ void postAck(int commandId) {
                                "\",\"commandId\":" + String(commandId) + "}");
 }
 
-void drainEvents() {
+// Send ALL queued events in one request (much faster over the internet than one-per-buzz).
+void flushEvents() {
   if (eqCount == 0 || WiFi.status() != WL_CONNECTED) return;
-  if (httpPostJson("/api/esp/event", eventQueue[eqHead].json)) {
-    eqHead = (eqHead + 1) % EVENT_QUEUE_MAX;
-    eqCount--;
+  String body = "{\"deviceId\":\"" + deviceId + "\",\"events\":[";
+  for (int i = 0; i < eqCount; i++) {
+    if (i) body += ",";
+    body += eventQueue[(eqHead + i) % EVENT_QUEUE_MAX].json;
+  }
+  body += "]}";
+  if (httpPostJson("/api/esp/events", body)) {
+    eqHead = eqTail;
+    eqCount = 0;
     portalReachable = true;
   } else {
     portalReachable = false;
@@ -476,6 +481,7 @@ void setup() {
 void loop() {
   static unsigned long lastWifiLog = 0;
   static unsigned long lastLedToggle = 0;
+  static unsigned long lastFlushMs = 0;
   static bool ledState = false;
 
   // Blink the status LED (1000 ms) to indicate an active internet/WiFi connection.
@@ -490,6 +496,9 @@ void loop() {
     digitalWrite(LED_PIN, LOW);
   }
 
+  // Capture presses into the event queue first.
+  drainPendingPresses();
+
   if (WiFi.status() != WL_CONNECTED) {
     if (millis() - lastWifiAttempt > WIFI_RETRY_MS) {
       lastWifiAttempt = millis();
@@ -497,11 +506,15 @@ void loop() {
       WiFi.begin(WIFI_SSID, WIFI_PASS);
     }
   } else {
+    // Send any queued events immediately (batched), before the periodic sync.
+    if (eqCount > 0 && millis() - lastFlushMs >= 40) {
+      lastFlushMs = millis();
+      flushEvents();
+    }
     if (millis() - lastSyncMs >= SYNC_INTERVAL_MS) {
       lastSyncMs = millis();
       syncPortal();
     }
-    drainEvents();
     if (millis() - lastWifiLog > 10000) {
       lastWifiLog = millis();
       Serial.printf("[status] wifi=ok ip=%s rssi=%d portal=%s mode=%s\n",
@@ -509,8 +522,6 @@ void loop() {
                     portalReachable ? "OK" : "UNREACHABLE", modeStr());
     }
   }
-
-  drainPendingPresses();
 
   if (mode == MODE_SCAN && scanActive && scanCount > 0 && !rapidMode &&
       (millis() - lastPressMs) >= scanSettleMs) {

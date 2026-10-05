@@ -186,12 +186,11 @@ app.post('/api/esp/ack', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/esp/event', (req, res) => {
-  const body = req.body || {};
-  device.handleEvent(body);
+function handleEspEvent(deviceId, type, payload) {
+  device.handleEvent({ deviceId, type, payload: payload || {} });
   const ctx = runningContext();
-  if (body.type === 'live_press') {
-    const p = body.payload || {};
+  if (type === 'live_press') {
+    const p = payload || {};
     if (ctx && ctx.round.type === 'rapid') {
       contest.rapidBuzz(ctx.contest, ctx.round, p.id, p.timeMs);
       const teams = contest.teamsInOrder(ctx.contest);
@@ -206,7 +205,20 @@ app.post('/api/esp/event', (req, res) => {
       console.log(`[buzz] live_press team=${p.id} IGNORED (context=${ctx ? ctx.round.type + '/' + ctx.round.live.phase : 'none'})`);
     }
   }
+}
+
+app.post('/api/esp/event', (req, res) => {
+  const b = req.body || {};
+  handleEspEvent(b.deviceId, b.type, b.payload);
   res.json({ ok: true });
+});
+
+// Batched events (device sends all queued presses in one request).
+app.post('/api/esp/events', (req, res) => {
+  const b = req.body || {};
+  const events = Array.isArray(b.events) ? b.events : [];
+  for (const ev of events) handleEspEvent(b.deviceId, ev && ev.type, ev && ev.payload);
+  res.json({ ok: true, count: events.length });
 });
 
 app.post('/api/check', auth.requireAuth, auth.requireAdmin, (req, res) => {

@@ -380,7 +380,7 @@ async function renderContest(){
   } else {
     pane.innerHTML = '<div class="card"><div class="empty">Select or add a round.</div></div>';
   }
-  if (running){ stopPoll(); S.pollTimer = setInterval(tickContest, 700); }
+  if (running){ stopPoll(); S.pollTimer = setInterval(tickContest, 500); }
   else { stopPoll(); }
 }
 
