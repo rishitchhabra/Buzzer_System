@@ -102,7 +102,7 @@ function advanceRapidCountdown() {
 
   if (l && l.phase === 'countdown' && l.countdownEndsAt && Date.now() >= l.countdownEndsAt) {
     contest.rapidShow(c, r);
-    device.enqueue('rapid_start');
+    device.enqueue('rapid_start', { goAt: Date.now(), remainingMs: 0 });
   }
 
   // Safety net: while a rapid question is open, make sure the device is actually armed
@@ -112,7 +112,7 @@ function advanceRapidCountdown() {
     const allBuzzed = (l.buzzerQueue || []).length >= teams.length;
     if (!allBuzzed && Date.now() - lastArmMs > 2000) {
       lastArmMs = Date.now();
-      device.enqueue('rapid_start');
+      device.enqueue('rapid_start', { goAt: Date.now(), remainingMs: 0 });
     }
   }
 }
@@ -175,11 +175,21 @@ app.delete('/api/teams/:id', auth.requireAuth, auth.requireAdmin, (req, res) => 
 });
 
 // ============================== DEVICE API ==============================
-app.get('/api/esp/sync', (req, res) => {
-  if (req.query.mode) store.get().device.mode = req.query.mode; // freshest reported mode
+// One request: device sends events/acks and receives config + commands.
+function espSync(req, res) {
+  const q = req.method === 'POST' ? (req.body || {}) : req.query;
+  if (q.mode) store.get().device.mode = q.mode; // freshest reported mode
   advanceRapidCountdown();
-  res.json(device.handleSync(req.query));
-});
+  if (Array.isArray(q.events)) {
+    for (const ev of q.events) handleEspEvent(q.deviceId, ev && ev.type, ev && ev.payload);
+  }
+  if (Array.isArray(q.acks)) {
+    for (const id of q.acks) device.ackCommand(id);
+  }
+  res.json(device.handleSync(q));
+}
+app.get('/api/esp/sync', espSync);
+app.post('/api/esp/sync', espSync);
 
 app.post('/api/esp/ack', (req, res) => {
   device.ackCommand((req.body || {}).commandId);
@@ -409,6 +419,7 @@ app.post('/api/contests/:id/rounds/:rid/start', auth.requireAuth, auth.requireAd
   const out = contest.startRound(c, r);
   if (!out.ok) return res.status(400).json(out);
   c.status = 'running';
+  if (r.type === 'rapid') device.enqueue('rapid_start', { goAt: r.live.countdownEndsAt, remainingMs: r.live.countdownEndsAt - Date.now() }); // arm during the countdown
   store.save();
   res.json({ ok: true });
 });
@@ -419,7 +430,7 @@ app.post('/api/contests/:id/rounds/:rid/show', auth.requireAuth, auth.requireAdm
   if (!r) return res.status(404).json({ ok: false, error: 'Not found' });
   if (r.type === 'rapid') {
     contest.rapidShow(c, r);
-    device.enqueue('rapid_start');
+    device.enqueue('rapid_start', { goAt: Date.now(), remainingMs: 0 });
     res.json({ ok: true });
   } else {
     res.json({ ok: true });
@@ -434,6 +445,7 @@ app.post('/api/contests/:id/rounds/:rid/next', auth.requireAuth, auth.requireAdm
   if (r.type === 'rapid') {
     out = contest.rapidNext(c, r);
     if (out.finished) device.enqueue('rapid_reset');
+    else device.enqueue('rapid_start', { goAt: r.live.countdownEndsAt, remainingMs: r.live.countdownEndsAt - Date.now() }); // arm during the next countdown
   } else {
     out = contest.normalNext(c, r);
   }
@@ -558,6 +570,11 @@ app.get('/api/display', (req, res) => {
     scores: c.scores,
     teams,
   });
+});
+
+// ============================== HEALTH ==============================
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, time: Date.now(), store: store.usingSQLite() ? 'sqlite' : 'json' });
 });
 
 // ============================== SPA fallback ==============================

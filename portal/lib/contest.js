@@ -260,10 +260,12 @@ function rapidShow(contest, round) {
 function rapidBuzz(contest, round, teamId, timeMs) {
   const l = round.live;
   if (!l || l.phase !== 'question') return;
+  const t = Number(timeMs);
+  if (!isFinite(t) || t < 0) return;              // pressed before the question was shown
   const teams = teamsInOrder(contest);
-  if (!teams.some((t) => t.id === Number(teamId))) return;
+  if (!teams.some((x) => x.id === Number(teamId))) return;
   if (l.buzzerQueue.some((b) => b.teamId === Number(teamId))) return;
-  l.buzzerQueue.push({ teamId: Number(teamId), timeMs: Number(timeMs) || 0 });
+  l.buzzerQueue.push({ teamId: Number(teamId), timeMs: t });
   l.buzzerQueue.sort((a, b) => a.timeMs - b.timeMs);
   save();
 }

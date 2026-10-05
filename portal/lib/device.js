@@ -36,9 +36,9 @@ function deleteTeam(id) {
   return { ok: true };
 }
 
-function enqueue(type) {
+function enqueue(type, data) {
   const st = get();
-  st.pendingCommands.push({ id: st.nextCommandId++, type, createdAt: Date.now() });
+  st.pendingCommands.push({ id: st.nextCommandId++, type, data: data || null, createdAt: Date.now() });
   save();
 }
 
@@ -53,10 +53,11 @@ function syncResponse() {
   st.pendingCommands = st.pendingCommands.filter((c) => now - c.createdAt < COMMAND_TTL_MS);
   return {
     ok: true,
+    serverTime: now,
     configVersion: st.configVersion,
     buzzers: st.teams.map((t) => ({ id: t.id, name: t.name, pin: t.pin })),
     scanSettleMs: SCAN_SETTLE_MS,
-    commands: st.pendingCommands.map((c) => ({ id: c.id, type: c.type })),
+    commands: st.pendingCommands.map((c) => ({ id: c.id, type: c.type, data: c.data })),
   };
 }
 

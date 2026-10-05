@@ -258,9 +258,10 @@ function applyQueue(d){
     node.className = 'buzz' + (i===0?' first':'') + (node.classList.contains('enter')?' enter':'');
     const color = colorFor(b.teamId, d.teams);
     const pct = q.length>1 ? (25 + 75*(1 - (b.timeMs||0)/maxT)) : 100;
+    const tm = ((b.timeMs||0)/1000).toFixed(2) + ' s';
     node.innerHTML = `<span class="rank" style="color:${i===0?'#241600':'var(--txt)'}">${i+1}</span>
       <span class="nm">${esc(b.teamName)}</span>
-      <span class="tm">${(b.timeMs||0).toFixed(1)} ms</span>
+      <span class="tm">${tm}</span>
       <span class="bar" style="width:${pct}%;background:${color}"></span>`;
     if(!node.parentNode) list.appendChild(node);
     setTimeout(()=>node.classList.remove('enter'), 500);

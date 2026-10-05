@@ -10,6 +10,13 @@
 // setInsecure() encrypts but does not verify the certificate; to verify, call
 // netClient.setCACert(ROOT_CA_PEM) in setup instead (e.g. the ISRG Root X1 cert).
 WiFiClientSecure netClient;
+WiFiClient plainClient;   // used automatically for plain http:// (local testing)
+
+// Pick the transport from the URL scheme, so PORTAL_BASE can be http:// or https://.
+bool httpBegin(HTTPClient& http, const String& url) {
+  if (url.startsWith("https://")) return http.begin(netClient, url);
+  return http.begin(plainClient, url);
+}
 
 // ------------------------------------------------------------------
 //  Buzzer ESP32 device
@@ -55,6 +62,7 @@ bool portalReachable = false;
 unsigned long lastSyncMs = 0;
 unsigned long lastWifiAttempt = 0;
 bool rapidMode = false;   // continuous buzzer capture (no auto-settle)
+long long clockOffsetUs = 0;  // serverTime(us) - micros(), for time-synced timing
 
 Preferences prefs;
 
@@ -179,41 +187,94 @@ void loadConfigCache() {
 }
 
 // --------------------------- outgoing posts ---------------------------
-bool httpPostJson(const String& path, const String& body) {
-  if (WiFi.status() != WL_CONNECTED) return false;
-  HTTPClient http;
-  http.setConnectTimeout(4000);
-  http.setTimeout(4000);
-  http.setReuse(true);
-  String url = String(PORTAL_BASE) + path;
-  if (!http.begin(netClient, url)) return false;
-  http.addHeader("Content-Type", "application/json");
-  int code = http.POST(body);
-  http.end();
-  return code > 0 && code < 300;
-}
+// Acks are queued and piggybacked on the next sync (no separate request).
+int pendingAcks[64];
+int ackCount = 0;
+int syncFails = 0;
+
+void handleCommand(const String& t, long long goAt, long long remainingMs);   // defined below
 
 void postAck(int commandId) {
-  httpPostJson("/api/esp/ack", "{\"deviceId\":\"" + deviceId +
-                               "\",\"commandId\":" + String(commandId) + "}");
+  if (commandId && ackCount < 64) pendingAcks[ackCount++] = commandId;
 }
 
-// Send ALL queued events in one request (much faster over the internet than one-per-buzz).
-void flushEvents() {
-  if (eqCount == 0 || WiFi.status() != WL_CONNECTED) return;
-  String body = "{\"deviceId\":\"" + deviceId + "\",\"events\":[";
+// Send queued events + acks and receive config/commands in ONE request.
+void syncPortal() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  String body = "{\"deviceId\":\"" + deviceId + "\"";
+  body += ",\"rssi\":" + String(WiFi.RSSI());
+  body += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
+  body += ",\"fw\":\"" + String(FW_VERSION) + "\"";
+  body += ",\"mode\":\"" + String(modeStr()) + "\"";
+  body += ",\"uptime\":" + String(millis() / 1000);
+  int evSent = eqCount;
+  body += ",\"events\":[";
   for (int i = 0; i < eqCount; i++) {
     if (i) body += ",";
     body += eventQueue[(eqHead + i) % EVENT_QUEUE_MAX].json;
   }
-  body += "]}";
-  if (httpPostJson("/api/esp/events", body)) {
-    eqHead = eqTail;
-    eqCount = 0;
-    portalReachable = true;
-  } else {
-    portalReachable = false;
+  body += "],\"acks\":[";
+  int ackSent = ackCount;
+  for (int i = 0; i < ackCount; i++) {
+    if (i) body += ",";
+    body += String(pendingAcks[i]);
   }
+  body += "]}";
+
+  HTTPClient http;
+  http.setConnectTimeout(4000);
+  http.setTimeout(4000);
+  http.setReuse(true);
+  String url = String(PORTAL_BASE) + "/api/esp/sync";
+  if (!httpBegin(http, url)) {
+    portalReachable = false;
+    return;
+  }
+  http.addHeader("Content-Type", "application/json");
+  int code = http.POST(body);
+  if (code != 200) {
+    portalReachable = false;
+    syncFails++;
+    if (syncFails == 1 || syncFails % 10 == 0) {
+      Serial.printf("[portal] sync HTTP %d (%s) [fail #%d]\n",
+                    code, http.errorToString(code).c_str(), syncFails);
+    }
+    http.end();
+    return;
+  }
+  if (evSent) { eqHead = eqTail; eqCount = 0; }
+  if (ackSent) { ackCount = 0; }
+  if (!portalReachable) Serial.println("[portal] connected (sync OK)");
+  portalReachable = true;
+  syncFails = 0;
+
+  String resp = http.getString();
+  JsonDocument doc;
+  if (!deserializeJson(doc, resp)) {
+    // Sync clock to the server so buzz times can be measured from the question's display instant.
+    long long stServer = doc["serverTime"].as<long long>();
+    if (stServer > 0) clockOffsetUs = stServer * 1000LL - (long long)micros();
+
+    int cv = doc["configVersion"] | 0;
+    if (cv != configVersion) {
+      applyConfig(doc["buzzers"].as<JsonArray>());
+      configVersion = cv;
+      saveConfigCache();
+    }
+    int settle = doc["scanSettleMs"] | 0;
+    if (settle > 0) scanSettleMs = settle;
+
+    for (JsonObject cmd : doc["commands"].as<JsonArray>()) {
+      int cid = cmd["id"] | 0;
+      String type = cmd["type"].as<String>();
+      long long goAt = cmd["data"]["goAt"].as<long long>();
+      long long remainingMs = cmd["data"]["remainingMs"].as<long long>();
+      handleCommand(type, goAt, remainingMs);
+      if (cid) postAck(cid);
+    }
+  }
+  http.end();
 }
 
 // --------------------------- result senders ---------------------------
@@ -267,13 +328,24 @@ void handlePress(int i, unsigned long edgeUs) {
       queueEvent("test_update", "{\"id\":" + String(b.id) + ",\"online\":true}");
     }
   } else if (mode == MODE_SCAN && scanActive) {
-    if (b.order == 0) {
-      scanCount++;
-      b.order = scanCount;
-      unsigned long t = (edgeUs > scanStartUs) ? (edgeUs - scanStartUs) : 0;
+    if (rapidMode) {
+      // Ignore any press made BEFORE the question is displayed (before the baseline).
+      if ((long)(edgeUs - scanStartUs) < 0) return;
+      unsigned long t = edgeUs - scanStartUs;   // microseconds since the question appeared
       b.pressUs = t;
       lastPressMs = millis();
-      Serial.printf("[buzz] press id=%d order=%d %.1f ms\n", b.id, b.order, t / 1000.0);
+      Serial.printf("[buzz] press id=%d %.2f s\n", b.id, t / 1000000.0);
+      queueEvent("live_press",
+                 "{\"id\":" + String(b.id) +
+                 ",\"name\":\"" + jsonEscape(b.name) + "\"" +
+                 ",\"timeMs\":" + String(t / 1000.0, 2) + "}");
+    } else if (b.order == 0) {
+      unsigned long t = (edgeUs > scanStartUs) ? (edgeUs - scanStartUs) : 0;
+      b.pressUs = t;
+      scanCount++;
+      b.order = scanCount;
+      lastPressMs = millis();
+      Serial.printf("[buzz] scan press id=%d order=%d\n", b.id, b.order);
       queueEvent("live_press",
                  "{\"id\":" + String(b.id) +
                  ",\"name\":\"" + jsonEscape(b.name) + "\"" +
@@ -305,7 +377,7 @@ void drainPendingPresses() {
 }
 
 // --------------------------- commands ---------------------------
-void handleCommand(const String& t) {
+void handleCommand(const String& t, long long goAt, long long remainingMs) {
   if (t == "test_start") {
     mode = MODE_TEST;
     scanActive = false;
@@ -324,12 +396,27 @@ void handleCommand(const String& t) {
     scanActive = false;
     if (mode == MODE_SCAN) mode = MODE_IDLE;
   } else if (t == "rapid_start") {
-    mode = MODE_SCAN;
-    resetScan();
-    scanActive = true;
-    scanStartUs = micros();
-    rapidMode = true;
-    Serial.printf("[buzz] rapid_start - armed %d buzzer(s)\n", buzzerCount);
+    // Idempotent: if already armed, don't reset the timing baseline.
+    if (!(rapidMode && scanActive)) {
+      mode = MODE_SCAN;
+      resetScan();
+      scanActive = true;
+      rapidMode = true;
+      if (goAt > 0 && clockOffsetUs != 0) {
+        // Baseline = the instant the question is displayed (server clock -> device micros).
+        scanStartUs = (unsigned long)(goAt * 1000LL - clockOffsetUs);
+      } else if (remainingMs > 0) {
+        // Fallback: count down on the device from now (no clock sync available).
+        scanStartUs = micros() + (unsigned long)(remainingMs * 1000LL);
+      } else {
+        scanStartUs = micros();
+      }
+      noInterrupts();
+      for (int i = 0; i < buzzerCount; i++) buzzers[i].pending = false;
+      interrupts();
+      Serial.printf("[buzz] rapid_start - armed %d buzzer(s), baseline offset %lld us\n",
+                    buzzerCount, (long long)scanStartUs - (long long)micros());
+    }
   } else if (t == "rapid_reset") {
     resetScan();
     scanActive = false;
@@ -357,7 +444,7 @@ void probePortal() {
   http.setConnectTimeout(6000);
   http.setTimeout(6000);
   http.setReuse(true);
-  if (!http.begin(netClient, url)) {
+  if (!httpBegin(http, url)) {
     Serial.println("[portal] FAILED: could not parse/begin URL");
     return;
   }
@@ -367,63 +454,6 @@ void probePortal() {
   } else {
     Serial.printf("[portal] FAILED: %s (code %d)\n",
                   http.errorToString(code).c_str(), code);
-  }
-  http.end();
-}
-
-// --------------------------- portal sync ---------------------------
-int syncFails = 0;
-
-void syncPortal() {
-  if (WiFi.status() != WL_CONNECTED) return;
-  HTTPClient http;
-  http.setConnectTimeout(4000);
-  http.setTimeout(4000);
-  http.setReuse(true);
-  String url = String(PORTAL_BASE) + "/api/esp/sync?deviceId=" + deviceId +
-               "&rssi=" + String(WiFi.RSSI()) +
-               "&ip=" + WiFi.localIP().toString() +
-               "&fw=" + FW_VERSION +
-               "&mode=" + modeStr() +
-               "&uptime=" + String(millis() / 1000);
-  if (!http.begin(netClient, url)) {
-    portalReachable = false;
-    Serial.println("[portal] sync FAILED: could not begin URL");
-    return;
-  }
-  int code = http.GET();
-  if (code != 200) {
-    portalReachable = false;
-    syncFails++;
-    if (syncFails == 1 || syncFails % 10 == 0) {
-      Serial.printf("[portal] sync HTTP %d (%s) -> %s  [fail #%d]\n",
-                    code, http.errorToString(code).c_str(),
-                    url.c_str(), syncFails);
-    }
-    http.end();
-    return;
-  }
-  if (!portalReachable) Serial.println("[portal] connected (sync OK)");
-  portalReachable = true;
-  syncFails = 0;
-  String body = http.getString();
-  JsonDocument doc;
-  if (!deserializeJson(doc, body)) {
-    int cv = doc["configVersion"] | 0;
-    if (cv != configVersion) {
-      applyConfig(doc["buzzers"].as<JsonArray>());
-      configVersion = cv;
-      saveConfigCache();
-    }
-    int settle = doc["scanSettleMs"] | 0;
-    if (settle > 0) scanSettleMs = settle;
-
-    for (JsonObject cmd : doc["commands"].as<JsonArray>()) {
-      int cid = cmd["id"] | 0;
-      String type = cmd["type"].as<String>();
-      handleCommand(type);
-      if (cid) postAck(cid);
-    }
   }
   http.end();
 }
@@ -481,7 +511,6 @@ void setup() {
 void loop() {
   static unsigned long lastWifiLog = 0;
   static unsigned long lastLedToggle = 0;
-  static unsigned long lastFlushMs = 0;
   static bool ledState = false;
 
   // Blink the status LED (1000 ms) to indicate an active internet/WiFi connection.
@@ -506,12 +535,10 @@ void loop() {
       WiFi.begin(WIFI_SSID, WIFI_PASS);
     }
   } else {
-    // Send any queued events immediately (batched), before the periodic sync.
-    if (eqCount > 0 && millis() - lastFlushMs >= 40) {
-      lastFlushMs = millis();
-      flushEvents();
-    }
-    if (millis() - lastSyncMs >= SYNC_INTERVAL_MS) {
+    // Sync immediately when there are events/acks to send, otherwise on the interval.
+    bool urgent = (eqCount > 0 || ackCount > 0);
+    bool due = urgent ? (millis() - lastSyncMs >= 80) : (millis() - lastSyncMs >= SYNC_INTERVAL_MS);
+    if (due) {
       lastSyncMs = millis();
       syncPortal();
     }

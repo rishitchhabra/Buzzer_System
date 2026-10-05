@@ -15,6 +15,7 @@ const S = {
   marksValue: '',
   liveKey: null,
   adminLiveKey: null,
+  badgeMs: 0,
 };
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -642,8 +643,17 @@ async function reloadContest(){
 function liveLayoutKey(r){
   const l = r.live || {};
   const scored = l.lastScored ? (l.lastScored.teamId + ':' + l.lastScored.awarded) : '';
-  if (r.type === 'rapid') return 'rapid|' + l.phase + '|' + (l.qIndex||0) + '|' + scored;
+  const hasBuzz = (l.buzzerQueue && l.buzzerQueue.length) ? '1' : '0';
+  if (r.type === 'rapid') return 'rapid|' + l.phase + '|' + (l.qIndex||0) + '|' + scored + '|' + hasBuzz;
   return r.type + '|' + l.phase + '|' + (l.cursor||0) + '|' + scored;
+}
+
+// Select an MCQ option in place (no full re-render => no queue flicker).
+function chooseOption(i){
+  S.selOption = i;
+  document.querySelectorAll('.opt[data-opt]').forEach(el=>{
+    el.classList.toggle('sel', Number(el.dataset.opt) === i);
+  });
 }
 
 async function tickContest(){
@@ -653,16 +663,24 @@ async function tickContest(){
   if (isEditing()) return;
   S.contest = d.contest;
   const running = S.contest.rounds.find(r=>r.id===S.contest.currentRoundId && r.status==='running');
-  if (!running){ renderContest(); refreshDeviceBadge(); return; }
+  if (!running){ renderContest(); scheduleBadgeRefresh(); return; }
   if (liveLayoutKey(running) === S.adminLiveKey){
     // Layout unchanged: update dynamic bits in place so nothing flickers.
     if (running.type === 'rapid') applyAdminQueue(running);
-    await refreshDeviceBadge();
-    if (running.type === 'rapid') updateArmBadge();
+    scheduleBadgeRefresh(); // separate, throttled request
     return;
   }
   renderContest();
-  refreshDeviceBadge();
+  scheduleBadgeRefresh();
+}
+
+// Refresh the device badge at most every ~2.5s (keeps the live poll single-request).
+function scheduleBadgeRefresh(){
+  const now = Date.now();
+  if (!S.badgeMs || now - S.badgeMs > 2500){
+    S.badgeMs = now;
+    refreshDeviceBadge().then(()=>updateArmBadge());
+  }
 }
 
 function liveHTML(c, r){
@@ -723,10 +741,15 @@ function triggerCountdown(key, onDone){
   tick();
 }
 
+// Each team's exact reaction time since the question was displayed.
+function fmtSec(ms){
+  return ((ms || 0) / 1000).toFixed(2) + ' s';
+}
+
 function queueItemsHTML(l){
   const q = l.buzzerQueue || [];
   if (!q.length) return '<div class="queue-hint mut small">Waiting for a team to buzz…</div>';
-  return q.map((b,i)=>`<div class="buzz ${i===0?'first':''}" data-id="${b.teamId}" style="order:${i}"><div class="pos">${i+1}</div><div class="nm">${esc(b.teamName)}</div><div class="tm">${(b.timeMs||0).toFixed(1)} ms</div></div>`).join('');
+  return q.map((b,i)=>`<div class="buzz ${i===0?'first':''}" data-id="${b.teamId}" style="order:${i}"><div class="pos">${i+1}</div><div class="nm">${esc(b.teamName)}</div><div class="tm">${fmtSec(b.timeMs)}</div></div>`).join('');
 }
 
 function rapidQueueHTML(c, r, l){
@@ -746,7 +769,7 @@ function applyAdminQueue(r){
     if (!node){ node = document.createElement('div'); node.dataset.id = b.teamId; list.appendChild(node); node.classList.add('enter'); setTimeout(()=>node.classList.remove('enter'), 350); }
     node.style.order = i;
     node.className = 'buzz' + (i===0?' first':'') + (node.classList.contains('enter')?' enter':'');
-    node.innerHTML = `<div class="pos">${i+1}</div><div class="nm">${esc(b.teamName)}</div><div class="tm">${(b.timeMs||0).toFixed(1)} ms</div>`;
+    node.innerHTML = `<div class="pos">${i+1}</div><div class="nm">${esc(b.teamName)}</div><div class="tm">${fmtSec(b.timeMs)}</div>`;
   });
 }
 
@@ -767,7 +790,7 @@ function rapidAnswerHTML(c, r, l, q){
   let inner;
   if (r.isMcq){
     inner = `<div class="mut small" style="margin-bottom:10px">Top team: <b>${esc(top.teamName)}</b> — select the option they gave:</div>` +
-      q.options.map((o,i)=>`<div class="opt ${S.selOption===i?'sel':''}" onclick="S.selOption=${i};renderContest()"><span class="k">${String.fromCharCode(65+i)}</span><span>${esc(o.text)}</span></div>`).join('') +
+      q.options.map((o,i)=>`<div class="opt ${S.selOption===i?'sel':''}" data-opt="${i}" onclick="chooseOption(${i})"><span class="k">${String.fromCharCode(65+i)}</span><span>${esc(o.text)}</span></div>`).join('') +
       `<button class="btn" style="margin-top:10px" onclick="rapidAnswer(${top.teamId})">${icon('check',16)}<span>Submit Answer</span></button>`;
   } else {
     inner = `<div class="mut small" style="margin-bottom:10px">Top team: <b>${esc(top.teamName)}</b></div>
@@ -827,7 +850,7 @@ function normalLiveHTML(c, r, l){
     card = questionBox(c, r, q, it.teamName);
     if (isMcq){
       card += `<div class="card"><h3>Answer for ${esc(it.teamName)}</h3>
-        ${q.options.map((o,i)=>`<div class="opt ${S.selOption===i?'sel':''}" onclick="S.selOption=${i};renderContest()"><span class="k">${String.fromCharCode(65+i)}</span><span>${esc(o.text)}</span></div>`).join('')}
+        ${q.options.map((o,i)=>`<div class="opt ${S.selOption===i?'sel':''}" data-opt="${i}" onclick="chooseOption(${i})"><span class="k">${String.fromCharCode(65+i)}</span><span>${esc(o.text)}</span></div>`).join('')}
         <button class="btn" style="margin-top:10px" onclick="submitMcq()">${icon('check',16)}<span>Submit Answer</span></button></div>`;
     } else if (judge){
       card += `<div class="card"><div class="mut" style="margin-bottom:8px">Waiting for the judge to enter marks for <b>${esc(it.teamName)}</b>…</div></div>`;

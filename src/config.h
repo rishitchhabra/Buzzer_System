@@ -10,9 +10,10 @@
 #define WIFI_PASS "rishit2006"
 
 // ---- Portal URL --------------------------------------------
-// Use the HTTPS domain (firmware now uses a TLS client).
-// For a LAN machine without TLS, plain http://IP:PORT still works.
-#define PORTAL_BASE "https://buzzer.gispilibhit.com"
+// Local test:   http://192.168.x.x:3000   (plain HTTP)
+// Deployed:     https://your-domain.com   (TLS)
+// The firmware picks HTTP or HTTPS automatically from this value.
+#define PORTAL_BASE "http://172.20.10.3:3000"
 
 // ---- Device behaviour --------------------------------------
 #define FW_VERSION "2.0.0"
