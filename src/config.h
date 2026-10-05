@@ -9,11 +9,10 @@
 #define WIFI_SSID "iPhone"
 #define WIFI_PASS "rishit2006"
 
-// ---- Portal running on your machine ------------------------
-// Use your machine's LAN IP and the portal port (default 3000).
-// Find it on macOS with:  ipconfig getifaddr en0
-//                        (or en1 for Wi-Fi on some Macs)
-#define PORTAL_BASE "http://172.20.10.3:3000"
+// ---- Portal URL --------------------------------------------
+// Use the HTTPS domain (firmware now uses a TLS client).
+// For a LAN machine without TLS, plain http://IP:PORT still works.
+#define PORTAL_BASE "https://buzzer.gispilibhit.com"
 
 // ---- Device behaviour --------------------------------------
 #define FW_VERSION "2.0.0"

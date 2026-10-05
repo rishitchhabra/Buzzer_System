@@ -1,9 +1,15 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include "config.h"
+
+// Shared TLS client for the HTTPS portal connection.
+// setInsecure() encrypts but does not verify the certificate; to verify, call
+// netClient.setCACert(ROOT_CA_PEM) in setup instead (e.g. the ISRG Root X1 cert).
+WiFiClientSecure netClient;
 
 // ------------------------------------------------------------------
 //  Buzzer ESP32 device
@@ -177,12 +183,12 @@ void loadConfigCache() {
 // --------------------------- outgoing posts ---------------------------
 bool httpPostJson(const String& path, const String& body) {
   if (WiFi.status() != WL_CONNECTED) return false;
-  WiFiClient client;
   HTTPClient http;
-  http.setConnectTimeout(1500);
-  http.setTimeout(2500);
+  http.setConnectTimeout(4000);
+  http.setTimeout(4000);
+  http.setReuse(true);
   String url = String(PORTAL_BASE) + path;
-  if (!http.begin(client, url)) return false;
+  if (!http.begin(netClient, url)) return false;
   http.addHeader("Content-Type", "application/json");
   int code = http.POST(body);
   http.end();
@@ -339,14 +345,14 @@ void printWifiInfo() {
 }
 
 void probePortal() {
-  WiFiClient client;
   HTTPClient http;
   String url = String(PORTAL_BASE) + "/api/health";
   Serial.print("[portal] probing ");
   Serial.println(url);
-  http.setConnectTimeout(4000);
-  http.setTimeout(4000);
-  if (!http.begin(client, url)) {
+  http.setConnectTimeout(6000);
+  http.setTimeout(6000);
+  http.setReuse(true);
+  if (!http.begin(netClient, url)) {
     Serial.println("[portal] FAILED: could not parse/begin URL");
     return;
   }
@@ -365,17 +371,17 @@ int syncFails = 0;
 
 void syncPortal() {
   if (WiFi.status() != WL_CONNECTED) return;
-  WiFiClient client;
   HTTPClient http;
-  http.setConnectTimeout(1500);
-  http.setTimeout(2500);
+  http.setConnectTimeout(4000);
+  http.setTimeout(4000);
+  http.setReuse(true);
   String url = String(PORTAL_BASE) + "/api/esp/sync?deviceId=" + deviceId +
                "&rssi=" + String(WiFi.RSSI()) +
                "&ip=" + WiFi.localIP().toString() +
                "&fw=" + FW_VERSION +
                "&mode=" + modeStr() +
                "&uptime=" + String(millis() / 1000);
-  if (!http.begin(client, url)) {
+  if (!http.begin(netClient, url)) {
     portalReachable = false;
     Serial.println("[portal] sync FAILED: could not begin URL");
     return;
@@ -444,6 +450,10 @@ void setup() {
 
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
+
+  // HTTPS: encrypt without cert verification. To verify, replace with:
+  //   netClient.setCACert(ROOT_CA_PEM);
+  netClient.setInsecure();
 
   prefs.begin("buzzer", false);
   loadConfigCache();
